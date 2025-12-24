@@ -5,6 +5,7 @@ import random
 from kafka import KafkaProducer
 from faker import Faker
 import threading
+from fault_injector import FaultInjector  # Import the FaultInjector
 
 # Kafka configuration
 KAFKA_BROKER = os.environ.get("KAFKA_BROKER", "localhost:9092")
@@ -15,6 +16,9 @@ NUM_PATIENTS = int(os.environ.get("NUM_PATIENTS", "10"))
 VITAL_SIGNS = ["heart_rate", "blood_pressure", "temperature", "oxygen_saturation"]
 
 fake = Faker()
+
+# Initialize FaultInjector with desired probabilities
+fault_injector = FaultInjector(missing_field_prob=0.2, delay_prob=0.3, max_delay=3, out_of_order_prob=0.2)
 
 
 def generate_vitals():
@@ -31,11 +35,16 @@ def patient_simulator(patient_id, producer):
         vitals = generate_vitals()
         vitals["patient_id"] = patient_id
         vitals["name"] = fake.name()
-        vitals["timestamp"] = time.time()
-        message = json.dumps(vitals).encode("utf-8")
+        #vitals["timestamp"] = time.time() # Original timestamp
+
+        # Inject faults
+        corrupted_vitals, timestamp = fault_injector.maybe_inject_faults(vitals)
+        corrupted_vitals["timestamp"] = timestamp.isoformat()
+
+        message = json.dumps(corrupted_vitals).encode("utf-8")
         try:
             producer.send(KAFKA_TOPIC, message)
-            print(f"Patient {patient_id}: Sent vitals: {vitals}")
+            print(f"Patient {patient_id}: Sent vitals: {corrupted_vitals}")
         except Exception as e:
             print(f"Patient {patient_id}: Error sending vitals: {e}")
         time.sleep(random.uniform(0.5, 2))
@@ -62,6 +71,7 @@ def main():
         for thread in threads:
             thread.join()
         producer.close()
+
 
 if __name__ == "__main__":
     main()
